@@ -1,7 +1,9 @@
 #define _GNU_SOURCE
 #define _FILE_OFFSET_BITS 64
 
+#include <errno.h>
 #include <stdio.h>
+#include <endian.h>
 #include <inttypes.h>
 #include <string.h>
 #include <getopt.h>
@@ -93,9 +95,45 @@ struct vhd_dyn
 	uint8_t reserved1[256];
 };
 
+static uint32_t vhd_checksum(uint8_t *data, size_t size)
+{
+	uint32_t csum = 0;
+	while (size--) {
+		csum += *data++;
+	}
+	return ~csum;
+}
+
+static int vhd_footer_csum(struct vhd_footer *footer)
+{
+	uint32_t nsum;
+	uint32_t csum = footer->checksum;
+	footer->checksum = 0;
+	nsum = vhd_checksum((uint8_t *) footer, sizeof(*footer));
+	footer->checksum = csum;
+	if (nsum != be32toh(csum))
+		return -EINVAL;
+	return 0;
+}
+
+static int vhd_dyn_csum(struct vhd_dyn *dyn)
+{
+	uint32_t nsum;
+	uint32_t csum = dyn->checksum;
+	dyn->checksum = 0;
+	nsum = vhd_checksum((uint8_t *) dyn, sizeof(*dyn));
+	dyn->checksum = csum;
+	if (nsum != be32toh(csum))
+		return -EINVAL;
+
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	uint64_t size;
+	struct vhd_footer footer;
+	struct vhd_dyn dyn;
 
 	while (1) {
 		int c;
@@ -105,10 +143,35 @@ int main(int argc, char **argv)
 
 		switch (c) {
 		case 's':
+		{
+			char type;
 
 			/* Handle VHD size. */
-			size = 0;
+			sscanf (optarg, "%ju%c", &size, &type);
+			switch (type) {
+			case 't':
+			case 'T':
+				size <<= 10;
+			case 'g':
+			case 'G':
+				size <<= 10;
+			case 'm':
+			case 'M':
+				size <<= 10;
+			case 'k':
+			case 'K':
+				size <<= 10;
+			case 'b':
+			case 'B':
+				break;
+			default:
+				fprintf(stderr, "%s: size modifer '%c' not one of [BKMGT]\n",
+					argv[0], type);
+				return -1;
+			}
+			printf("size = %ju bytes\n", size);
 			break;
+		}
 		case 't':
 
 			/* Handle VHD type. */
