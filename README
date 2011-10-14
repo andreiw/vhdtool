@@ -1,7 +1,9 @@
 VHDtool
 ==========
 
-A tool to examine and manipulate VHD images.
+A tool to examine and manipulate VHD images. Initially
+meant as a way to test dynamic VHD support in my
+Linux kernel loop VHD parser support.
 
 Examples
 ========
