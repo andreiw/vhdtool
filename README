@@ -3,12 +3,37 @@ VHDtool
 
 A tool to examine and manipulate VHD images. Initially
 meant as a way to test dynamic VHD support in my
-Linux kernel loop VHD parser support.
+Linux kernel loop VHD parser support (yet doesn't
+support dynamic VHDs, rofl).
+
+Building
+========
+
+Builds on recent Linux (i.e. not RHEL5, *sigh*), and
+needs libuuid (you probably have it).
+
+To build:
+
+$ make
 
 Examples
 ========
 
-WIP.
+Generate a 512-byte fixed VHD:
+
+$ vhdtool -s 512 test.vhd
+
+Generate a 50 sector fixed VHD:
+
+$ vhdtool -s 512s test.vhd
+
+Valid size modifiers are:
+b/B/*nothing* -> bytes
+k/K           -> kilobytes
+m/M           -> megabytes
+g/G           -> gigabytes
+t/T           -> terabytes
+s/S           -> sectors
 
 Contact Info
 ============
