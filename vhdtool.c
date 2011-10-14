@@ -165,6 +165,34 @@ static void vhd_chs(struct vhd *vhd)
 	vhd->footer.disk_geometry.s = chs.s;
 }
 
+void vhd_footer(struct vhd *vhd, uint64_t data_offset)
+{
+	memset(&vhd->footer, 0, sizeof(vhd->footer));
+	vhd->footer.cookie = htobe64(COOKIE("andreiwv"));
+	vhd->footer.features = htobe32(FOOTER_FEAT_RSVD);
+	vhd->footer.data_offset = htobe64(data_offset);
+	vhd->footer.file_format_ver = htobe32(VHD_VERSION_1);
+	vhd->footer.time_stamp = htobe32(time(NULL) + SECONDS_OFFSET);
+	vhd->footer.creator_app = htobe32(COOKIE32("vhdt"));
+	vhd->footer.creator_ver = htobe32(0x1);
+	vhd->footer.creator_os = htobe32(COOKIE32("Lnux"));
+	vhd->footer.original_size = htobe64(vhd->size);
+	vhd->footer.current_size = htobe64(vhd->size);
+	vhd->footer.disk_type = htobe32(vhd->type);
+	vhd_chs(vhd);
+	uuid_generate((uint8_t *) &vhd->footer.vhd_id);
+	uuid_unparse((uint8_t *) &vhd->footer.vhd_id, vhd->uuid_str);
+	printf("Generating %s VHD %s (%ju bytes)\n",
+	       vhd->type == FOOTER_TYPE_FIXED ? "fixed" : "dynamic",
+	       vhd->uuid_str, vhd->size);
+	vhd->footer.vhd_id.f1 = htobe32(vhd->footer.vhd_id.f1);
+	vhd->footer.vhd_id.f2 = htobe16(vhd->footer.vhd_id.f2);
+	vhd->footer.vhd_id.f3 = htobe16(vhd->footer.vhd_id.f3);
+	vhd->footer.checksum = vhd_checksum((uint8_t *) &vhd->footer,
+					   sizeof(vhd->footer));
+	vhd->footer.checksum = htobe32(vhd->footer.checksum);
+}
+
 int main(int argc, char **argv)
 {
 	struct vhd vhd;
@@ -235,30 +263,7 @@ int main(int argc, char **argv)
 		return -1;
 	};
 
-	memset(&vhd.footer, 0, sizeof(vhd.footer));
-	vhd.footer.cookie = htobe64(COOKIE("andreiwv"));
-	vhd.footer.features = htobe32(FOOTER_FEAT_RSVD);
-	vhd.footer.file_format_ver = htobe32(VHD_VERSION_1);
-	vhd.footer.data_offset = htobe64(FOOTER_DOFF_FIXED);
-	vhd.footer.time_stamp = htobe32(time(NULL) + SECONDS_OFFSET);
-	vhd.footer.creator_app = htobe32(COOKIE32("vhdt"));
-	vhd.footer.creator_ver = htobe32(0x1);
-	vhd.footer.creator_os = htobe32(COOKIE32("Lnux"));
-	vhd.footer.original_size = htobe64(vhd.size);
-	vhd.footer.current_size = htobe64(vhd.size);
-	vhd.footer.disk_type = htobe32(vhd.type);
-	vhd_chs(&vhd);
-	uuid_generate((uint8_t *) &vhd.footer.vhd_id);
-	uuid_unparse((uint8_t *) &vhd.footer.vhd_id, vhd.uuid_str);
-	printf("Generating %s VHD %s (%ju bytes)\n",
-	       vhd.type == FOOTER_TYPE_FIXED ? "fixed" : "dynamic",
-	       vhd.uuid_str, vhd.size);
-	vhd.footer.vhd_id.f1 = htobe32(vhd.footer.vhd_id.f1);
-	vhd.footer.vhd_id.f2 = htobe16(vhd.footer.vhd_id.f2);
-	vhd.footer.vhd_id.f3 = htobe16(vhd.footer.vhd_id.f3);
-	vhd.footer.checksum = vhd_checksum((uint8_t *) &vhd.footer,
-					   sizeof(vhd.footer));
-	vhd.footer.checksum = htobe32(vhd.footer.checksum);
+	vhd_footer(&vhd, FOOTER_DOFF_FIXED);
 
 	vhd.fd = creat(argv[optind], 0644);
 	if (vhd.fd == -1) {
