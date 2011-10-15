@@ -239,7 +239,7 @@ int vhd_footer(struct vhd *vhd,
 		return -1;
 	}
 
-	vhd->footer.cookie = COOKIE("andreiwv");
+	vhd->footer.cookie = COOKIE("conectix");
 	vhd->footer.features = htobe32(FOOTER_FEAT_RSVD);
 	vhd->footer.data_offset = htobe64(data_offset);
 	vhd->footer.file_format_ver = htobe32(VHD_VERSION_1);
@@ -270,12 +270,11 @@ int vhd_dyn(struct vhd *vhd, uint32_t block_size)
 	vhd->dyn.table_offset = htobe64(vhd->offset + sizeof(vhd->dyn));
 	vhd->dyn.header_version = htobe32(DYN_VERSION_1);
 
-	if (!block_size)
-		block_size = DYN_BLOCK_SZ;
-	else if (block_size >> 9 << 9 != block_size) {
+	if (block_size >> 9 << 9 != block_size) {
 		fprintf(stderr, "Block size must be in units of 512-byte sectors\n");
 		return -1;
 	}
+
 	vhd->dyn.block_size = htobe32(block_size);
 	vhd->dyn.max_tab_entries = vhd->size / block_size;
 	if (!vhd->dyn.max_tab_entries) {
@@ -388,6 +387,9 @@ int main(int argc, char **argv)
 		else
 			vhd_type = FOOTER_TYPE_FIXED;
 	}
+
+	if (!block_size)
+		block_size = DYN_BLOCK_SZ;
 
 	if ((status = vhd_footer(&vhd,
 				 vhd_size, vhd_type,
