@@ -289,6 +289,8 @@ int vhd_dyn(struct vhd *vhd, uint32_t block_size)
 		return -1;		
 	}
 	vhd->dyn.max_tab_entries = htobe32(vhd->dyn.max_tab_entries);
+	vhd->dyn.checksum = vhd_checksum((uint8_t *) &vhd->dyn,
+					   sizeof(vhd->dyn));
 	vhd->dyn.checksum = htobe32(vhd->dyn.checksum);
 	return 0;
 }
