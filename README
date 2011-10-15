@@ -4,13 +4,14 @@ VHDtool
 A tool to examine and manipulate VHD images. Initially
 meant as a way to test dynamic VHD support in my
 Linux kernel loop VHD parser support (yet doesn't
-support dynamic VHDs, rofl).
+crete working dynamic VHDs yet, rofl).
 
 Building
 ========
 
 Builds on recent Linux (i.e. not RHEL5, *sigh*), and
-needs libuuid (you probably have it).
+needs libuuid (you probably have it, but look for
+libuuid-devel or some similar package).
 
 To build:
 
@@ -19,6 +20,9 @@ $ make
 Examples
 ========
 
+$ vhdtool
+vhdtool -s size [-b block_size] [-t type] vhd-file-name
+
 Generate a 512-byte fixed VHD:
 
 $ vhdtool -s 512 test.vhd
@@ -26,6 +30,14 @@ $ vhdtool -s 512 test.vhd
 Generate a 50 sector fixed VHD:
 
 $ vhdtool -s 512s test.vhd
+
+Generate a 12mb dynamic VHD:
+
+$ vhdtool -s 12m -t dyn test.vhd
+
+Generate a 12mb dynamic VHD with non-default (2mb) block size:
+
+$ vhdtool -s 12m -b 4m test.vhd
 
 Valid size modifiers are:
 b/B/*nothing* -> bytes
