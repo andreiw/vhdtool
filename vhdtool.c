@@ -16,8 +16,6 @@
 
 #define COOKIE(x)           (*(uint64_t *) x)
 #define COOKIE32(x)         (*(uint32_t *) x)
-#define MY_COOKIE           COOKIE("andreiwv")
-#define CXSPARSE_COOKIE     COOKIE("cxsparse")
 #define FOOTER_FEAT_RSVD    (2)
 #define VHD_VERSION_1       (0x00010000UL)
 #define VHD_VMAJ_MASK       (0xFFFF0000UL)
@@ -241,14 +239,14 @@ int vhd_footer(struct vhd *vhd,
 		return -1;
 	}
 
-	vhd->footer.cookie = htobe64(COOKIE("andreiwv"));
+	vhd->footer.cookie = COOKIE("andreiwv");
 	vhd->footer.features = htobe32(FOOTER_FEAT_RSVD);
 	vhd->footer.data_offset = htobe64(data_offset);
 	vhd->footer.file_format_ver = htobe32(VHD_VERSION_1);
 	vhd->footer.time_stamp = htobe32(time(NULL) + SECONDS_OFFSET);
-	vhd->footer.creator_app = htobe32(COOKIE32("vhdt"));
+	vhd->footer.creator_app = COOKIE32("vhdt");
 	vhd->footer.creator_ver = htobe32(0x1);
-	vhd->footer.creator_os = htobe32(COOKIE32("Lnux"));
+	vhd->footer.creator_os = COOKIE32("Lnux");
 	vhd->footer.original_size = htobe64(vhd->size);
 	vhd->footer.current_size = htobe64(vhd->size);
 	vhd->footer.disk_type = htobe32(type);
@@ -267,7 +265,7 @@ int vhd_footer(struct vhd *vhd,
 
 int vhd_dyn(struct vhd *vhd, uint32_t block_size)
 {
-	vhd->dyn.cookie = htobe64(CXSPARSE_COOKIE);
+	vhd->dyn.cookie = COOKIE("cxsparse");
 	vhd->dyn.data_offset = htobe64(DYN_DOFF_DYN);
 	vhd->dyn.table_offset = htobe64(vhd->offset + sizeof(vhd->dyn));
 	vhd->dyn.header_version = htobe32(DYN_VERSION_1);
