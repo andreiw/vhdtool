@@ -9,6 +9,10 @@ Why would you use this instead of qemu-img? VHDtool
 lets you tweak more parameters and create funky
 VHDs (and will support differencing disks soon too!).
 
+One more reason is that qemu-img actually produces
+corrupt images that don't fit the VHD spec. Unsure
+if they event mount on Win7.
+
 Stay tuned.
 
 Building
