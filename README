@@ -3,7 +3,8 @@ VHDtool
 
 A tool to examine and manipulate VHD images. Initially
 meant as a way to test dynamic VHD support in my
-Linux kernel loop VHD parser support.
+Linux kernel loop VHD parser support. Images mount
+in Win7.
 
 Why would you use this instead of qemu-img? VHDtool
 lets you tweak more parameters and create funky
