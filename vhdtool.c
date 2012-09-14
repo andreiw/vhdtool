@@ -476,8 +476,8 @@ int main(int argc, char **argv)
 		}
 		}
 	}
-	
-	if (do_help || optind != (argc - 1)) {
+
+	if (do_help || optind == argc) {
 		fprintf(stderr, "%s [-s size] [-b block_size] [-t type] create|convert ...\n",
 			argv[0]);
 		return -1;
@@ -494,4 +494,6 @@ int main(int argc, char **argv)
 		fprintf(stderr, "Unknown command '%s'\n", argv[optind]);
 		return -1;
 	}
+
+	return status;
 }
