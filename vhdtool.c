@@ -312,10 +312,95 @@ int vhd_dyn(struct vhd *vhd, uint32_t block_size)
 	return 0;
 }
 
-int main(int argc, char **argv)
+int vhd_convert(int optind,
+	       int argc,
+	       char **argv,
+	       uint32_t vhd_type,
+	       off64_t block_size)
+{
+	fprintf(stderr, "conversion not yet supported\n");
+
+	return -1;
+}
+
+int vhd_create(int optind,
+	       int argc,
+	       char **argv,
+	       off64_t vhd_size,
+	       uint32_t vhd_type,
+	       off64_t block_size)
 {
 	int status;
 	struct vhd vhd;
+
+	if (optind != (argc - 1) || !vhd_size) {
+		fprintf(stderr, "%s -s size [-b block_size] [-t type] create vhd-file-name\n",
+			argv[0]);
+		return -1;
+	}
+
+	if (!vhd_size) {
+		fprintf(stderr, "Missing VHD size parameter\n");
+		return -1;
+	}
+
+	if (vhd_init(&vhd, argv[optind]))
+		return -1;
+
+	if (!vhd_type) {
+		if (block_size)
+			vhd_type = FOOTER_TYPE_DYN;
+		else
+			vhd_type = FOOTER_TYPE_FIXED;
+	}
+
+	if (!block_size)
+		block_size = DYN_BLOCK_SZ;
+
+	if ((status = vhd_footer(&vhd,
+				 vhd_size, vhd_type,
+				 vhd_type == FOOTER_TYPE_FIXED ?
+				 FOOTER_DOFF_FIXED :
+				 sizeof(vhd.footer))))
+		goto done;
+
+	printf("Generating %s VHD %s (%ju bytes)\n",
+	       vhd_type == FOOTER_TYPE_FIXED ? "fixed" : "dynamic",
+	       vhd.uuid_str, vhd.size);
+
+	if (vhd_type == FOOTER_TYPE_FIXED) {
+		vhd.offset = vhd.size;
+		if ((status = vhd_write(&vhd, (uint8_t *) &vhd.footer, sizeof(vhd.footer))))
+			goto done;
+	} else {
+		size_t bat_entries;
+		vhd.offset = 0;
+		vhd_batent empty = BAT_ENTRY_EMPTY;
+
+		if ((status = vhd_write(&vhd, (uint8_t *) &vhd.footer, sizeof(vhd.footer))))
+			goto done;
+		if ((status = vhd_dyn(&vhd, block_size)))
+			goto done;
+		if ((status = vhd_write(&vhd, (uint8_t *) &vhd.dyn, sizeof(vhd.dyn))))
+			goto done;
+
+		bat_entries = vhd_size / block_size;
+		while (bat_entries--)
+			if ((status = vhd_write(&vhd, (uint8_t *) &empty, sizeof(empty))))
+				goto done;
+		vhd.offset = round_up(vhd.offset, 512);
+		if ((status = vhd_write(&vhd, (uint8_t *) &vhd.footer, sizeof(vhd.footer))))
+			goto done;
+	}
+done:
+	if (vhd_close(&vhd, status))
+		return -1;
+	return 0;
+}
+
+int main(int argc, char **argv)
+{
+	int status;
 	off64_t vhd_size = 0;
 	uint32_t vhd_type = 0;
 	off64_t block_size = 0;
@@ -392,63 +477,21 @@ int main(int argc, char **argv)
 		}
 	}
 	
-	if (do_help || !vhd_size || optind != (argc - 1)) {
-		printf("%s -s size [-b block_size] [-t type] vhd-file-name\n",
+	if (do_help || optind != (argc - 1)) {
+		fprintf(stderr, "%s [-s size] [-b block_size] [-t type] create|convert ...\n",
 			argv[0]);
 		return -1;
 	};
 
-	if (vhd_init(&vhd, argv[optind]))
-		return -1;
-
-	if (!vhd_type) {
-		if (block_size)
-			vhd_type = FOOTER_TYPE_DYN;
-		else
-			vhd_type = FOOTER_TYPE_FIXED;
-	}
-
-	if (!block_size)
-		block_size = DYN_BLOCK_SZ;
-
-	if ((status = vhd_footer(&vhd,
-				 vhd_size, vhd_type,
-				 vhd_type == FOOTER_TYPE_FIXED ? 
-				 FOOTER_DOFF_FIXED :
-				 sizeof(vhd.footer))))
-		goto done;
-
-	printf("Generating %s VHD %s (%ju bytes)\n",
-	       vhd_type == FOOTER_TYPE_FIXED ? "fixed" : "dynamic",
-	       vhd.uuid_str, vhd.size);
-
-	if (vhd_type == FOOTER_TYPE_FIXED) {
-		vhd.offset = vhd.size;
-		if ((status = vhd_write(&vhd, (uint8_t *) &vhd.footer, sizeof(vhd.footer))))
-			goto done;
+	/* First optind will be a command selector. */
+	if (strcmp(argv[optind], "create") == 0) {
+		status = vhd_create(optind + 1, argc, argv, vhd_size,
+				    vhd_type, block_size);
+	} else if (strcmp(argv[optind], "convert") == 0) {
+		status = vhd_convert(optind + 1, argc, argv, vhd_type,
+				     block_size);
 	} else {
-		size_t bat_entries;
-		vhd.offset = 0;
-		vhd_batent empty = BAT_ENTRY_EMPTY;
-
-		if ((status = vhd_write(&vhd, (uint8_t *) &vhd.footer, sizeof(vhd.footer))))
-			goto done;
-		if ((status = vhd_dyn(&vhd, block_size)))
-			goto done;
-		if ((status = vhd_write(&vhd, (uint8_t *) &vhd.dyn, sizeof(vhd.dyn))))
-			goto done;
-
-		bat_entries = vhd_size / block_size;
-		while (bat_entries--)
-			if ((status = vhd_write(&vhd, (uint8_t *) &empty, sizeof(empty))))
-				goto done;
-		vhd.offset = round_up(vhd.offset, 512);
-		if ((status = vhd_write(&vhd, (uint8_t *) &vhd.footer, sizeof(vhd.footer))))
-			goto done;
-	}
-
-done:
-	if (vhd_close(&vhd, status))
+		fprintf(stderr, "Unknown command '%s'\n", argv[optind]);
 		return -1;
-	return 0;
+	}
 }
