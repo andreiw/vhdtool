@@ -56,6 +56,10 @@
 #define DYN_BLOCK_SZ        0x200000
 #define BAT_ENTRY_EMPTY     0xFFFFFFFF
 
+#define OPEN_RAW_OK (1 << 1)
+#define OPEN_RW     (1 << 2)
+#define OPEN_CREAT  (1 << 3)
+
 /* All fields Big-Endian */
 struct vhd_id
 {
@@ -124,6 +128,10 @@ struct vhd_dyn
 
 typedef uint32_t vhd_batent;
 
+struct vhd;
+typedef int (*op_read_t)(struct vhd *, void *, off64_t, size_t);
+typedef int (*op_write_t)(struct vhd *, void *, off64_t, size_t);
+
 struct vhd
 {
 	struct vhd_footer footer;
@@ -133,41 +141,150 @@ struct vhd
 	off64_t size;
 	off64_t offset;
 	int fd;
+	off64_t file_size;
+	uint32_t type;
+	unsigned flags;
+	op_read_t read;
+	op_write_t write;
 };
 
-int vhd_init(struct vhd *vhd,
-	     char *name)
+int vhd_read(struct vhd *vhd,
+	     void *buf,
+	     size_t size)
 {
-	memset(vhd, 0, sizeof(*vhd));
-	vhd->fd = -1;
-	vhd->name = name;
-
-	return 0;
-}
-
-int vhd_write(struct vhd *vhd,
-	      uint8_t *buf,
-	      size_t size)
-{
-	if (vhd->fd == -1) {
-		vhd->fd = creat(vhd->name, 0644);
-		if (vhd->fd == -1) {
-			perror("Couldn't open VHD file for writing");
-			return -1;
-		}
-	}
-
 	if (lseek64(vhd->fd, vhd->offset, SEEK_SET) != vhd->offset) {
-		perror("Couldn't seek VHD file");
+		fprintf(stderr, "couldn't seek '%s': %s\n",
+			vhd->name, strerror(errno));
 		return -1;
 	}
 
-	if (write(vhd->fd, buf, size) !=  (int) size) {
-		perror("Couldn't write VHD metadata");
+	if (read(vhd->fd, buf, size) !=  (int) size) {
+		fprintf(stderr, "couldn't read from '%s': %s\n",
+			vhd->name, strerror(errno));
 		return -1;
 	}
 
 	vhd->offset += size;
+	return 0;
+}
+
+int vhd_write(struct vhd *vhd,
+	      void *buf,
+	      size_t size)
+{
+	if (lseek64(vhd->fd, vhd->offset, SEEK_SET) != vhd->offset) {
+		fprintf(stderr, "couldn't seek '%s': %s\n",
+			vhd->name, strerror(errno));
+		return -1;
+	}
+
+	if (write(vhd->fd, buf, size) !=  (int) size) {
+		fprintf(stderr, "couldn't read from '%s': %s\n",
+			vhd->name, strerror(errno));
+		return -1;
+	}
+
+	vhd->offset += size;
+	return 0;
+}
+
+int op_raw_read(struct vhd *vhd, void *buf, off64_t offset, size_t size)
+{
+	if (offset > vhd->size ||
+	    (off64_t) (offset + size) > vhd->size) {
+		fprintf(stderr, "out-of-bound read from '%s'\n",
+			vhd->name);
+		return -1;
+	}
+
+	vhd->offset = offset;
+	return vhd_read(vhd, buf, size);
+}
+
+int op_raw_write(struct vhd *vhd, void *buf, off64_t offset, size_t size)
+{
+	if (offset > vhd->size ||
+	    (off64_t) (offset + size) > vhd->size) {
+		fprintf(stderr, "out-of-bound read from '%s'\n",
+			vhd->name);
+		return -1;
+	}
+
+	vhd->offset = offset;
+	return vhd_write(vhd, buf, size);
+}
+
+int vhd_verify(struct vhd *vhd)
+{
+	uint32_t type;
+
+	if (vhd->footer.cookie != COOKIE("conectix")) {
+		return -1;
+	}
+
+	type = be32toh(vhd->footer.disk_type);
+	if (type != FOOTER_TYPE_FIXED) {
+		return -1;
+	}
+
+	vhd->read = op_raw_read;
+	vhd->write = op_raw_write;
+	vhd->size = vhd->file_size - sizeof(vhd->footer);
+
+	/* TBD: More checks and dynamic disks. */
+	return 0;
+}
+
+int vhd_open(struct vhd *vhd,
+	     char *name,
+	     unsigned flags)
+{
+	struct stat stat;
+	memset(vhd, 0, sizeof(*vhd));
+	vhd->flags = flags;
+	vhd->name = name;
+
+	if (flags & OPEN_CREAT) {
+		vhd->fd = open(vhd->name, O_CREAT | O_EXCL | O_RDWR,
+			       0644);
+	} else {
+		vhd->fd = open(vhd->name, flags & OPEN_RW ?
+			       O_RDWR : O_RDONLY);
+	}
+	if (vhd->fd == -1) {
+		fprintf(stderr, "couldn't open '%s': %s\n", vhd->name,
+			strerror(errno));
+		return -1;
+	}
+
+	if (flags & OPEN_CREAT) {
+		return 0;
+	}
+
+	if (fstat(vhd->fd, &stat) == -1) {
+		fprintf(stderr, "couldn't stat '%s': %s\n",
+			vhd->name, strerror(errno));
+		return -1;
+	}
+
+	vhd->file_size = stat.st_size;
+	vhd->offset = vhd->file_size - sizeof(vhd->footer);
+	if (vhd_read(vhd, &vhd->footer, sizeof(vhd->footer)) == -1) {
+		return -1;
+	}
+
+	if (vhd_verify(vhd) == -1) {
+		if (flags & OPEN_RAW_OK) {
+			fprintf(stderr, "'%s' treated as raw image\n",
+				vhd->name);
+			vhd->read = op_raw_read;
+			vhd->write = op_raw_write;
+			vhd->size = vhd->file_size;
+			return 0;
+		}
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -176,18 +293,20 @@ int vhd_close(struct vhd *vhd, int status)
 	if (vhd->fd != -1) {
 		if (!status) {
 			if (fsync(vhd->fd)) {
-				perror("Couldn't flush VHD data");
+				perror("couldn't flush VHD data");
 				return -1;
 			}
 
 			if (close(vhd->fd)) {
-				perror("Couldn't close VHD file");
+				perror("couldn't close VHD file");
 				return -1;
 			}
 		} else {
-			if (unlink(vhd->name)) {
-				perror("Couldn't clean up VHD file");
-				return -1;
+			if (vhd->flags & OPEN_CREAT) {
+				if (unlink(vhd->name)) {
+					perror("couldn't clean up VHD file");
+					return -1;
+				}
 			}
 		}
 	}
@@ -204,10 +323,20 @@ uint32_t vhd_checksum(uint8_t *data, size_t size)
 	return ~csum;
 }
 
-void vhd_chs(struct vhd *vhd)
+unsigned min(unsigned a, unsigned b)
+{
+	if (a < b) {
+		return a;
+	} else {
+		return b;
+	}
+}
+
+int vhd_chs(struct vhd *vhd)
 {
 	uint64_t cyl_x_heads;
 	struct vhd_chs chs;
+	uint64_t new_sectors;
 	uint64_t sectors = vhd->size >> 9;
 
 	/*
@@ -246,16 +375,33 @@ void vhd_chs(struct vhd *vhd)
 	vhd->footer.disk_geometry.c = htobe16(chs.c);
 	vhd->footer.disk_geometry.h = chs.h;
 	vhd->footer.disk_geometry.s = chs.s;
+
+	if (sectors < 65535 * 16 * 255) {
+
+		/*
+		 * All of this nonsense matters only for disks < 127GB.
+		 */
+		new_sectors = chs.c * chs.h * chs.s;
+		if (new_sectors != sectors) {
+			printf("C(%u)H(%u)S(%u)-derived total sector count (%lu) doesn't match actual (%lu), you may have problems with Hyper-V if converting raw disks to VHD, or if moving VHDs from ATA to SCSI\n",
+				chs.c, chs.h, chs.s,
+				new_sectors, sectors);
+		}
+	}
+
+	return 0;
 }
 
 int vhd_footer(struct vhd *vhd,
-	       off64_t size,
-	       uint32_t type,
 	       uint64_t data_offset)
 {
-	vhd->size = size;
 	if (vhd->size >> 9 << 9 != vhd->size) {
-		fprintf(stderr, "Size must be in units of 512-byte sectors\n");
+		fprintf(stderr, "size must be in units of 512-byte sectors\n");
+		return -1;
+	}
+
+	if (vhd_chs(vhd) == -1) {
+		fprintf(stderr, "size is too small\n");
 		return -1;
 	}
 
@@ -269,8 +415,7 @@ int vhd_footer(struct vhd *vhd,
 	vhd->footer.creator_os = COOKIE32("Lnux");
 	vhd->footer.original_size = htobe64(vhd->size);
 	vhd->footer.current_size = htobe64(vhd->size);
-	vhd->footer.disk_type = htobe32(type);
-	vhd_chs(vhd);
+	vhd->footer.disk_type = htobe32(vhd->type);
 	uuid_generate((uint8_t *) &vhd->footer.vhd_id);
 	uuid_unparse((uint8_t *) &vhd->footer.vhd_id, vhd->uuid_str);
 	vhd->footer.vhd_id.f1 = htobe32(vhd->footer.vhd_id.f1);
@@ -291,14 +436,14 @@ int vhd_dyn(struct vhd *vhd, uint32_t block_size)
 	vhd->dyn.header_version = htobe32(DYN_VERSION_1);
 
 	if (block_size >> 9 << 9 != block_size) {
-		fprintf(stderr, "Block size must be in units of 512-byte sectors\n");
+		fprintf(stderr, "block size must be in units of 512-byte sectors\n");
 		return -1;
 	}
 
 	vhd->dyn.block_size = htobe32(block_size);
 	vhd->dyn.max_tab_entries = vhd->size / block_size;
 	if (!vhd->dyn.max_tab_entries) {
-		fprintf(stderr, "Block size can't be larger than the VHD\n");
+		fprintf(stderr, "block size can't be larger than the VHD\n");
 		return -1;
 	}
 	if (vhd->dyn.max_tab_entries * block_size != vhd->size) {
@@ -312,23 +457,135 @@ int vhd_dyn(struct vhd *vhd, uint32_t block_size)
 	return 0;
 }
 
-int vhd_convert(int optind,
-	       int argc,
-	       char **argv,
-	       uint32_t vhd_type,
+int vhd_create(struct vhd *vhd,
 	       off64_t block_size)
 {
-	fprintf(stderr, "conversion not yet supported\n");
+	int status;
 
-	return -1;
+	if (!block_size)
+		block_size = DYN_BLOCK_SZ;
+
+	if ((status = vhd_footer(vhd,
+				 vhd->type == FOOTER_TYPE_FIXED ?
+				 FOOTER_DOFF_FIXED :
+				 sizeof(vhd->footer)))) {
+		goto done;
+	}
+
+	printf("creating %s VHD %s (%ju bytes)\n",
+	       vhd->type == FOOTER_TYPE_FIXED ? "fixed" : "dynamic",
+	       vhd->uuid_str, vhd->size);
+
+	if (vhd->type == FOOTER_TYPE_FIXED) {
+		vhd->offset = vhd->size;
+
+		vhd->read = op_raw_read;
+		vhd->write = op_raw_write;
+
+		if ((status = vhd_write(vhd, &vhd->footer, sizeof(vhd->footer))))
+			goto done;
+	} else {
+		size_t bat_entries;
+		vhd->offset = 0;
+		vhd_batent empty = BAT_ENTRY_EMPTY;
+
+		if ((status = vhd_write(vhd, &vhd->footer, sizeof(vhd->footer))))
+			goto done;
+		if ((status = vhd_dyn(vhd, block_size)))
+			goto done;
+		if ((status = vhd_write(vhd, &vhd->dyn, sizeof(vhd->dyn))))
+			goto done;
+
+		bat_entries = vhd->size / block_size;
+		while (bat_entries--)
+			if ((status = vhd_write(vhd, &empty, sizeof(empty))))
+				goto done;
+		vhd->offset = round_up(vhd->offset, 512);
+		if ((status = vhd_write(vhd, &vhd->footer, sizeof(vhd->footer))))
+			goto done;
+	}
+done:
+	return status;
 }
 
-int vhd_create(int optind,
-	       int argc,
-	       char **argv,
-	       off64_t vhd_size,
-	       uint32_t vhd_type,
-	       off64_t block_size)
+int vhd_copy(struct vhd *src, struct vhd *dst)
+{
+	int status;
+	off64_t pos;
+	uint8_t buf[SEC_SZ];
+
+	printf("copying contents from '%s' to '%s'\n",
+	       src->name, dst->name);
+	for (pos = 0; pos < src->size; pos += sizeof(buf)) {
+		status = src->read(src, &buf, pos, sizeof(buf));
+		if (status == -1) {
+			return -1;
+		}
+		status = dst->write(dst, &buf, pos, sizeof(buf));
+		if (status == -1) {
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+int vhd_cmd_convert(int optind,
+		    int argc,
+		    char **argv,
+		    uint32_t vhd_type,
+		    off64_t block_size)
+{
+	struct vhd src;
+	struct vhd dest;
+	int status;
+
+	if (optind != (argc - 2)) {
+		fprintf(stderr, "%s [-b block_size] [-t type] convert source-file-name dest-file-name\n",
+			argv[0]);
+		return -1;
+	}
+
+	if (!vhd_type) {
+		if (block_size)
+			vhd_type = FOOTER_TYPE_DYN;
+		else
+			vhd_type = FOOTER_TYPE_FIXED;
+	}
+
+	if (vhd_open(&src, argv[optind],
+		     OPEN_RAW_OK) == -1) {
+		return -1;
+	}
+
+	if (vhd_open(&dest, argv[optind+1],
+		     OPEN_RW | OPEN_CREAT) == -1) {
+		return -1;
+	}
+
+	dest.type = vhd_type;
+	dest.size = src.size;
+
+	status = vhd_create(&dest, block_size);
+	if (status == -1) {
+		goto done;
+	}
+
+	status = vhd_copy(&src, &dest);
+done:
+	if (vhd_close(&dest, status) == -1)
+		status = -1;
+	if (vhd_close(&src, status) == -1)
+		status = -1;
+	return status;
+}
+
+int vhd_cmd_create(int optind,
+		   int argc,
+		   char **argv,
+		   off64_t vhd_size,
+		   uint32_t vhd_type,
+		   off64_t block_size)
 {
 	int status;
 	struct vhd vhd;
@@ -340,12 +597,9 @@ int vhd_create(int optind,
 	}
 
 	if (!vhd_size) {
-		fprintf(stderr, "Missing VHD size parameter\n");
+		fprintf(stderr, "missing VHD size parameter\n");
 		return -1;
 	}
-
-	if (vhd_init(&vhd, argv[optind]))
-		return -1;
 
 	if (!vhd_type) {
 		if (block_size)
@@ -354,48 +608,20 @@ int vhd_create(int optind,
 			vhd_type = FOOTER_TYPE_FIXED;
 	}
 
-	if (!block_size)
-		block_size = DYN_BLOCK_SZ;
-
-	if ((status = vhd_footer(&vhd,
-				 vhd_size, vhd_type,
-				 vhd_type == FOOTER_TYPE_FIXED ?
-				 FOOTER_DOFF_FIXED :
-				 sizeof(vhd.footer))))
-		goto done;
-
-	printf("Generating %s VHD %s (%ju bytes)\n",
-	       vhd_type == FOOTER_TYPE_FIXED ? "fixed" : "dynamic",
-	       vhd.uuid_str, vhd.size);
-
-	if (vhd_type == FOOTER_TYPE_FIXED) {
-		vhd.offset = vhd.size;
-		if ((status = vhd_write(&vhd, (uint8_t *) &vhd.footer, sizeof(vhd.footer))))
-			goto done;
-	} else {
-		size_t bat_entries;
-		vhd.offset = 0;
-		vhd_batent empty = BAT_ENTRY_EMPTY;
-
-		if ((status = vhd_write(&vhd, (uint8_t *) &vhd.footer, sizeof(vhd.footer))))
-			goto done;
-		if ((status = vhd_dyn(&vhd, block_size)))
-			goto done;
-		if ((status = vhd_write(&vhd, (uint8_t *) &vhd.dyn, sizeof(vhd.dyn))))
-			goto done;
-
-		bat_entries = vhd_size / block_size;
-		while (bat_entries--)
-			if ((status = vhd_write(&vhd, (uint8_t *) &empty, sizeof(empty))))
-				goto done;
-		vhd.offset = round_up(vhd.offset, 512);
-		if ((status = vhd_write(&vhd, (uint8_t *) &vhd.footer, sizeof(vhd.footer))))
-			goto done;
-	}
-done:
-	if (vhd_close(&vhd, status))
+	if (vhd_open(&vhd, argv[optind],
+		     OPEN_RW | OPEN_CREAT)) {
 		return -1;
-	return 0;
+	}
+
+	vhd.type = vhd_type;
+	vhd.size = vhd_size;
+
+	status = vhd_create(&vhd, block_size);
+
+	if (vhd_close(&vhd, status)) {
+		return -1;
+	}
+	return status;
 }
 
 int main(int argc, char **argv)
@@ -454,7 +680,7 @@ int main(int argc, char **argv)
                                 break;
 			default:
 				fprintf(stderr, "%s size modifer '%c' not one of [BKMGTS]\n",
-					size == &block_size ? "Block" : "VHD",
+					size == &block_size ? "block" : "VHD",
 					type);
 				return -1;
 			}
@@ -485,14 +711,20 @@ int main(int argc, char **argv)
 
 	/* First optind will be a command selector. */
 	if (strcmp(argv[optind], "create") == 0) {
-		status = vhd_create(optind + 1, argc, argv, vhd_size,
-				    vhd_type, block_size);
+		status = vhd_cmd_create(optind + 1,
+					argc, argv, vhd_size,
+					vhd_type, block_size);
 	} else if (strcmp(argv[optind], "convert") == 0) {
-		status = vhd_convert(optind + 1, argc, argv, vhd_type,
-				     block_size);
+		status = vhd_cmd_convert(optind + 1,
+					 argc, argv, vhd_type,
+					 block_size);
 	} else {
-		fprintf(stderr, "Unknown command '%s'\n", argv[optind]);
+		fprintf(stderr, "unknown command '%s'\n", argv[optind]);
 		return -1;
+	}
+
+	if (status == -1) {
+		fprintf(stderr, "command '%s' failed\n", argv[optind]);
 	}
 
 	return status;
