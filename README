@@ -30,24 +30,36 @@ $ make
 Examples
 ========
 
-$ vhdtool
-vhdtool -s size [-b block_size] [-t type] vhd-file-name
+$ ./vhdtool 
+./vhdtool [-s size] [-b block_size] [-t type] create|convert ...
+
+$ ./vhdtool create
+./vhdtool -s size [-b block_size] [-t type] create vhd-file-name
+command 'create' failed
+
+$ ./vhdtool convert
+./vhdtool [-b block_size] [-t type] convert source-file-name dest-file-name
+command 'convert' failed
 
 Generate a 512-byte fixed VHD:
 
-$ vhdtool -s 512 test.vhd
+$ vhdtool -s 512 create test.vhd
 
 Generate a 50 sector fixed VHD:
 
-$ vhdtool -s 512s test.vhd
+$ vhdtool -s 512s create test.vhd
 
 Generate a 12mb dynamic VHD:
 
-$ vhdtool -s 12m -t dyn test.vhd
+$ vhdtool -s 12m -t dyn create test.vhd
 
 Generate a 12mb dynamic VHD with non-default (2mb) block size:
 
-$ vhdtool -s 12m -b 4m test.vhd
+$ vhdtool -s 12m -b 4m create test.vhd
+
+Convert a raw image to a VHD
+
+$ vhdtool convert test.raw test.vhd
 
 Valid size modifiers are:
 b/B/*nothing* -> bytes
