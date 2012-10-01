@@ -82,7 +82,7 @@ in size and the following apply to you:
    the emulated IDE controller and the virtual SCSI adapter in
    Hyper-V.
 
-The '-c' option, will ensure that the sector size implied by C/H/S
+The '-c' option, will ensure that the disk size implied by C/H/S
 calculations will never be less than the desired image size, with
 the side effect of making the image a little larger.
 
