@@ -485,7 +485,7 @@ int vhd_dyn(struct vhd *vhd, uint32_t block_size)
 			"than the VHD\n");
 		return -1;
 	}
-	if (vhd->dyn.max_tab_entries * block_size != vhd->size) {
+	if ((off64_t)vhd->dyn.max_tab_entries * block_size != vhd->size) {
 		fprintf(stderr,
 			"Error: VHD size not multiple of block size\n");
 		return -1;
