@@ -5,8 +5,10 @@ LDFLAGS := -luuid
 all: vhdtool
 
 vhdtool: vhdtool.o
+	$(CC) $^ $(LDFLAGS) -o $@
+
 vhdtool.o: vhdtool.c
 
 clean:
-	rm vhdtool vhdtool.o
+	rm -f vhdtool vhdtool.o
 
